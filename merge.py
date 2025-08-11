@@ -1,7 +1,5 @@
 import aaf2
 
-
-
 def wav_to_aaf(wav_path, aaf_path):
     with aaf2.open(aaf_path, 'w') as f:
         # Create a MasterMob (top-level media object)
