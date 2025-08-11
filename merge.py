@@ -1,45 +1,55 @@
 import aaf2
 
-def wav_to_aaf(wav_path, aaf_path):
+def wav_and_video_to_aaf(wav_path, video_path, aaf_path):
     with aaf2.open(aaf_path, 'w') as f:
-        # Create a MasterMob (top-level media object)
-        mob = f.create.MasterMob("Audio MasterMob")
-        f.content.mobs.append(mob)
+        # Create Audio MasterMob and import audio
+        audio_mob = f.create.MasterMob("Audio MasterMob")
+        f.content.mobs.append(audio_mob)
+        edit_rate = 48000
+        audio_mob.import_audio_essence(wav_path, edit_rate)
+        audio_slot = audio_mob.slots[0]
 
-        # Import WAV essence
-        edit_rate = 48000  # common audio sample rate
-        mob.import_audio_essence(wav_path, edit_rate)
+        # Create Video MasterMob (external reference only)
+        video_mob = f.create.MasterMob("Video MasterMob")
+        f.content.mobs.append(video_mob)
+        video_edit_rate = 25  # typical video frame rate
+        # No video essence import; just reference the MasterMob
+        # Create a SourceClip referencing the video MasterMob
+        video_slot_id = 1
 
-        # Create a CompositionMob (timeline)
-        comp_mob = f.create.CompositionMob("Audio Timeline")
+        # Create CompositionMob (timeline)
+        comp_mob = f.create.CompositionMob("Timeline")
         f.content.mobs.append(comp_mob)
 
-        # Get the master audio slot
-        master_slot = mob.slots[0]
-
-        # Add a placeholder video slot (slot_id=1)
-        # This creates an empty filler segment for video
-        video_filler = f.create.Filler(length=master_slot.length)
-        video_slot = f.create.TimelineMobSlot(
+        # Add video to timeline (slot_id=1)
+        video_source_clip = f.create.SourceClip(
+            length=audio_slot.length,  # match audio length for timeline
+            mob_id=video_mob.mob_id,
             slot_id=1,
-            segment=video_filler,
-            edit_rate=edit_rate
-        )
-        comp_mob.slots.append(video_slot)
-
-        # Link CompositionMob to MasterMob's audio slot (slot_id=2)
-        source_clip = f.create.SourceClip(
-            length=master_slot.length,
-            mob_id=mob.mob_id,
-            slot_id=master_slot.slot_id,
             start=0
         )
-        audio_slot = f.create.TimelineMobSlot(
+        video_timeline_slot = f.create.TimelineMobSlot(
+            slot_id=1,
+            segment=video_source_clip,
+            edit_rate=video_edit_rate
+        )
+        comp_mob.slots.append(video_timeline_slot)
+
+        # Add audio to timeline (slot_id=2)
+        audio_source_clip = f.create.SourceClip(
+            length=audio_slot.length,
+            mob_id=audio_mob.mob_id,
+            slot_id=audio_slot.slot_id,
+            start=0
+        )
+        audio_timeline_slot = f.create.TimelineMobSlot(
             slot_id=2,
-            segment=source_clip,
+            segment=audio_source_clip,
             edit_rate=edit_rate
         )
-        comp_mob.slots.append(audio_slot)
+        comp_mob.slots.append(audio_timeline_slot)
+
     print(f"AAF file created: {aaf_path}")
 
-wav_to_aaf("output.wav", "output.aaf")
+# Usage:
+wav_and_video_to_aaf("output.wav", "output.mxf", "output.aaf")
