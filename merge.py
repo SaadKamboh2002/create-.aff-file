@@ -1,39 +1,35 @@
 import aaf2
+import os
 
-with aaf2.open("example2.aaf", 'w') as f:
+aaf_path = "output.aaf"
+video_filename = "output.dnxhd"
+audio_filename = "output.wav"
+base_name = os.path.splitext(os.path.basename(aaf_path))[0]
 
-    # objects are create with a factory
-    # on the AAFFile Object
-    mob = f.create.MasterMob("Demo2")
-
-    # add the mob to the file
+with aaf2.open(aaf_path, 'w') as f:
+    # Create MasterMob for media, set name to video filename (with extension)
+    mob = f.create.MasterMob(video_filename)
     f.content.mobs.append(mob)
 
     edit_rate = 25
 
-    # lets also create a tape so we can add timecode (optional)
-    tape_mob = f.create.SourceMob()
-    f.content.mobs.append(tape_mob)
+    # Import video and audio essence
+    mob.import_dnxhd_essence(video_filename, edit_rate)
+    mob.import_audio_essence(audio_filename, edit_rate)
 
-    timecode_rate = 25
-    start_time = timecode_rate * 60 * 60 # 1 hour
-    tape_name = "Demo Tape"
+    # Set the mob's name property to the full filename (for DaVinci compatibility)
+    mob.name = video_filename
 
-    # add tape slots to tape mob
-    tape_mob.create_tape_slots(tape_name, edit_rate,
-                               timecode_rate, media_kind='picture')
-
-    # create sourceclip that references timecode
-    tape_clip = tape_mob.create_source_clip(1, start_time)
-
-    # now finally import the generated media
-    mob.import_dnxhd_essence("output.dnxhd", edit_rate, tape_clip)
-    mob.import_audio_essence("output.wav", edit_rate)
-
-    # Add timeline (CompositionMob)
+    # Get video and audio slots
     video_slot = mob.slots[0]  # assuming video is slot 0
     audio_slot = mob.slots[1]  # assuming audio is slot 1
 
+    # Remove all existing CompositionMobs AFTER essence import
+    for m in list(f.content.mobs):
+        if m.__class__.__name__ == "CompositionMob":
+            f.content.mobs.remove(m)
+
+    # Create only one timeline (CompositionMob)
     comp_mob = f.create.CompositionMob("Timeline")
     f.content.mobs.append(comp_mob)
 
