@@ -7,9 +7,9 @@ audio_filename = "output.wav"
 base_name = os.path.splitext(os.path.basename(aaf_path))[0]
 
 with aaf2.open(aaf_path, 'w') as f:
-    # Create MasterMob for media, set name to video filename (with extension)
-    mob = f.create.MasterMob(video_filename)
-    f.content.mobs.append(mob)
+    # creating mastermob for media, set the name to video filename with extension
+    mob = f.create.MasterMob(video_filename) # the mastermob contains the video and audio data
+    f.content.mobs.append(mob) # add the data to the AAF content
 
     edit_rate = 25
 
