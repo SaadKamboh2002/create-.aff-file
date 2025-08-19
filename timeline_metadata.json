@@ -1,0 +1,75 @@
+{
+  "timeline": {
+    "name": "Timeline",
+    "duration_seconds": 15,
+    "edit_rate": 25,
+    "total_frames": 375
+  },
+  "video": {
+    "file": "video.mxf",
+    "basename": "video.mxf",
+    "start_time_seconds": 0,
+    "start_frame": 0,
+    "duration_seconds": 10,
+    "duration_frames": 250,
+    "end_frame": 249,
+    "media_kind": "picture",
+    "format": {
+      "codec": "DNxHD",
+      "width": 1920,
+      "height": 1080,
+      "frame_rate": 25,
+      "aspect_ratio": "16/9"
+    }
+  },
+  "audio": {
+    "file": "sound.wav",
+    "basename": "sound.wav",
+    "start_time_seconds": 5,
+    "start_frame": 125,
+    "duration_seconds": 10,
+    "duration_frames": 250,
+    "end_frame": 374,
+    "media_kind": "sound",
+    "format": {
+      "codec": "PCM",
+      "channels": 2,
+      "sample_rate": 48000,
+      "bit_depth": 16,
+      "block_align": 4
+    }
+  },
+  "tracks": [
+    {
+      "track_id": 1,
+      "type": "video",
+      "name": "Video Track",
+      "clips": [
+        {
+          "source_file": "video.mxf",
+          "source_in": 0,
+          "source_out": 249,
+          "timeline_in": 0,
+          "timeline_out": 249,
+          "duration": 250
+        }
+      ]
+    },
+    {
+      "track_id": 2,
+      "type": "audio",
+      "name": "Audio Track", 
+      "clips": [
+        {
+          "source_file": "sound.wav",
+          "source_in": 0,
+          "source_out": 249,
+          "timeline_in": 125,
+          "timeline_out": 374,
+          "duration": 250
+        }
+      ]
+    }
+  ],
+  "description": "Timeline with 10s video starting at 0:00, 10s audio starting at 0:05, total duration 15s"
+}
