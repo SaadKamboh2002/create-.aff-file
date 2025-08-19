@@ -2,30 +2,37 @@ import aaf2
 import os
 import json
 
+# function will take metadata from JSON file and aaf output name
 def create_linked_aaf_from_metadata(metadata_file, aaf_output):
-    """Create a linked AAF file based on JSON metadata"""
-    
+    # creating aaf file based on JSON metadat
     # Load metadata
     with open(metadata_file, 'r') as f:
+        # the variable metadata will contain the data from JSON file
         metadata = json.load(f)
     
-    timeline = metadata['timeline']
-    video_info = metadata['video']
-    audio_info = metadata['audio']
+    timeline = metadata['timeline'] # get timeline data from json
+    video_info = metadata['video'] # get video data from json
+    video2_info = metadata['video2'] # get second video data from json
+    audio_info = metadata['audio'] # get audio data from json
     tracks = metadata['tracks']
     
     print(f"Creating AAF: {aaf_output}")
     print(f"Timeline duration: {timeline['duration_seconds']}s ({timeline['total_frames']} frames)")
-    print(f"Video: {video_info['duration_seconds']}s starting at {video_info['start_time_seconds']}s")
+    print(f"Video 1: {video_info['duration_seconds']}s starting at {video_info['start_time_seconds']}s")
+    print(f"Video 2: {video2_info['duration_seconds']}s starting at {video2_info['start_time_seconds']}s")
     print(f"Audio: {audio_info['duration_seconds']}s starting at {audio_info['start_time_seconds']}s")
     print()
     
     # Check if source files exist
     video_file = video_info['file']
+    video2_file = video2_info['file']
     audio_file = audio_info['file']
     
     if not os.path.exists(video_file):
         print(f"ERROR: Video file {video_file} not found!")
+        return False
+    if not os.path.exists(video2_file):
+        print(f"ERROR: Video 2 file {video2_file} not found!")
         return False
     if not os.path.exists(audio_file):
         print(f"ERROR: Audio file {audio_file} not found!")
@@ -35,12 +42,14 @@ def create_linked_aaf_from_metadata(metadata_file, aaf_output):
         with aaf2.open(aaf_output, 'w') as f:
             edit_rate = timeline['edit_rate']
             
-            # Create MasterMobs for video and audio
+            # Create MasterMobs for both videos and audio
             video_master = f.create.MasterMob(video_info['basename'])
+            video2_master = f.create.MasterMob(video2_info['basename'])
             audio_master = f.create.MasterMob(audio_info['basename'])
             f.content.mobs.append(video_master)
+            f.content.mobs.append(video2_master)
             f.content.mobs.append(audio_master)
-            print("Created MasterMobs")
+            print("Created MasterMobs for 2 videos and 1 audio")
             
             # Create external file references instead of importing essence
             print("Creating video file reference...")
@@ -76,6 +85,39 @@ def create_linked_aaf_from_metadata(metadata_file, aaf_output):
             video_master_slot.segment = video_source_mob.create_source_clip(1, media_kind='picture')
             video_master_slot.segment.length = video_info['duration_frames']
             
+            print("Creating video2 file reference...")
+            # Create SourceMob for second video with file locator
+            video2_source_mob = f.create.SourceMob(video2_info['basename'] + ".PHYS")
+            f.content.mobs.append(video2_source_mob)
+            
+            # Create file locator pointing to second MXF file
+            video2_locator = f.create.NetworkLocator()
+            video2_locator['URLString'].value = video2_info['basename']
+            
+            # Create video2 descriptor with file reference
+            video2_descriptor = f.create.CDCIDescriptor()
+            video2_descriptor['Locator'].append(video2_locator)
+            video2_descriptor['SampleRate'].value = edit_rate
+            video2_descriptor['StoredWidth'].value = video2_info['format']['width']
+            video2_descriptor['StoredHeight'].value = video2_info['format']['height']
+            video2_descriptor['FrameLayout'].value = "FullFrame"
+            video2_descriptor['ImageAspectRatio'].value = video2_info['format']['aspect_ratio']
+            video2_descriptor['Length'].value = video2_info['duration_frames']
+            # Add missing required properties
+            video2_descriptor['ComponentWidth'].value = 8  # 8-bit components
+            video2_descriptor['HorizontalSubsampling'].value = 2  # 4:2:2 subsampling typical for DNxHD
+            video2_descriptor['VideoLineMap'].value = [42, 0]  # Standard progressive line map
+            video2_source_mob.descriptor = video2_descriptor
+            
+            # Create video2 slot in SourceMob
+            video2_source_slot = video2_source_mob.create_empty_slot(edit_rate=edit_rate, media_kind='picture', slot_id=1)
+            video2_source_slot.segment.length = video2_info['duration_frames']
+            
+            # Link MasterMob to SourceMob for video2
+            video2_master_slot = video2_master.create_timeline_slot(edit_rate=edit_rate)
+            video2_master_slot.segment = video2_source_mob.create_source_clip(1, media_kind='picture')
+            video2_master_slot.segment.length = video2_info['duration_frames']
+            
             print("Creating audio file reference...")
             # Create SourceMob for audio with file locator
             audio_source_mob = f.create.SourceMob(audio_info['basename'] + ".PHYS")
@@ -108,13 +150,16 @@ def create_linked_aaf_from_metadata(metadata_file, aaf_output):
             
             # Set names
             video_master.name = video_info['basename']
+            video2_master.name = video2_info['basename']
             audio_master.name = audio_info['basename']
             
             # Get slots from MasterMobs
             video_slot = video_master.slots[0]
+            video2_slot = video2_master.slots[0]
             audio_slot = audio_master.slots[0]
             
-            print(f"Video slot length: {video_slot.segment.length} frames")
+            print(f"Video 1 slot length: {video_slot.segment.length} frames")
+            print(f"Video 2 slot length: {video2_slot.segment.length} frames")
             print(f"Audio slot length: {audio_slot.segment.length} frames")
             
             # Create timeline (CompositionMob)
@@ -122,25 +167,60 @@ def create_linked_aaf_from_metadata(metadata_file, aaf_output):
             f.content.mobs.append(comp_mob)
             print("Created timeline")
             
-            # Process video track
+            # Process video track with multiple clips
             video_track = tracks[0]
-            video_clip_info = video_track['clips'][0]
             
             # Create video timeline slot
             video_timeline_slot = comp_mob.create_picture_slot(edit_rate=edit_rate)
             video_timeline_slot.slot_id = video_track['track_id']
             
-            # Create video source clip with specific timing
-            video_source_clip = f.create.SourceClip(
-                length=video_clip_info['duration'],
-                mob_id=video_master.mob_id,
-                slot_id=video_slot.slot_id,
-                start=video_clip_info['source_in']  # Start position in source
-            )
-            
-            # Add to sequence
-            video_timeline_slot.segment.components.append(video_source_clip)
-            print(f"Added video clip: {video_clip_info['duration']} frames at timeline position {video_clip_info['timeline_in']}")
+            # Process each video clip
+            for i, video_clip_info in enumerate(video_track['clips']):
+                print(f"Processing video clip {i+1}: {video_clip_info['source_file']}")
+                
+                # Determine which master mob to use based on source file
+                if video_clip_info['source_file'] == video_info['basename']:
+                    master_mob = video_master
+                    master_slot = video_slot
+                    print(f"Using video 1 master mob")
+                elif video_clip_info['source_file'] == video2_info['basename']:
+                    master_mob = video2_master
+                    master_slot = video2_slot
+                    print(f"Using video 2 master mob")
+                else:
+                    print(f"ERROR: Unknown video file {video_clip_info['source_file']}")
+                    continue
+                
+                # Add filler if there's a gap before this clip
+                if i == 0 and video_clip_info['timeline_in'] > 0:
+                    # Add filler at the beginning
+                    filler = f.create.Filler()
+                    filler.length = video_clip_info['timeline_in']
+                    filler.media_kind = 'Picture'
+                    video_timeline_slot.segment.components.append(filler)
+                    print(f"Added video filler: {video_clip_info['timeline_in']} frames")
+                elif i > 0:
+                    # Check if there's a gap between this clip and the previous one
+                    prev_clip = video_track['clips'][i-1]
+                    gap = video_clip_info['timeline_in'] - (prev_clip['timeline_out'] + 1)
+                    if gap > 0:
+                        filler = f.create.Filler()
+                        filler.length = gap
+                        filler.media_kind = 'Picture'
+                        video_timeline_slot.segment.components.append(filler)
+                        print(f"Added video gap filler: {gap} frames")
+                
+                # Create video source clip
+                video_source_clip = f.create.SourceClip(
+                    length=video_clip_info['duration'],
+                    mob_id=master_mob.mob_id,
+                    slot_id=master_slot.slot_id,
+                    start=video_clip_info['source_in']  # Start position in source
+                )
+                
+                # Add to sequence
+                video_timeline_slot.segment.components.append(video_source_clip)
+                print(f"Added video clip: {video_clip_info['duration']} frames at timeline position {video_clip_info['timeline_in']}")
             
             # Process audio track
             audio_track = tracks[1]
@@ -192,7 +272,7 @@ if __name__ == "__main__":
     if create_linked_aaf_from_metadata(metadata_file, aaf_output):
         print(f"\\nFinal AAF file size: {os.path.getsize(aaf_output)} bytes")
         print(f"AAF file created: {aaf_output}")
-        print(f"This AAF references: output.dnxhd, output.wav")
+        print(f"This AAF references to the metadata in json")
         print(f"Make sure these files are in the same directory when opening in DaVinci Resolve!")
     else:
         print("\\nAAF creation failed!")

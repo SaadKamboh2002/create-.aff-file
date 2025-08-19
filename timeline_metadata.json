@@ -1,9 +1,9 @@
 {
   "timeline": {
     "name": "Timeline",
-    "duration_seconds": 15,
+    "duration_seconds": 20,
     "edit_rate": 25,
-    "total_frames": 375
+    "total_frames": 500
   },
   "video": {
     "file": "video.mxf",
@@ -39,6 +39,23 @@
       "block_align": 4
     }
   },
+  "video2": {
+    "file": "video2.mxf",
+    "basename": "video2.mxf",
+    "start_time_seconds": 15,
+    "start_frame": 375,
+    "duration_seconds": 5,
+    "duration_frames": 125,
+    "end_frame": 499,
+    "media_kind": "picture",
+    "format": {
+      "codec": "DNxHD",
+      "width": 1920,
+      "height": 1080,
+      "frame_rate": 25,
+      "aspect_ratio": "16/9"
+    }
+  },
   "tracks": [
     {
       "track_id": 1,
@@ -52,13 +69,21 @@
           "timeline_in": 0,
           "timeline_out": 249,
           "duration": 250
+        },
+        {
+          "source_file": "video2.mxf",
+          "source_in": 0,
+          "source_out": 124,
+          "timeline_in": 375,
+          "timeline_out": 499,
+          "duration": 125
         }
       ]
     },
     {
       "track_id": 2,
       "type": "audio",
-      "name": "Audio Track", 
+      "name": "Audio Track",
       "clips": [
         {
           "source_file": "sound.wav",
@@ -71,5 +96,5 @@
       ]
     }
   ],
-  "description": "Timeline with 10s video starting at 0:00, 10s audio starting at 0:05, total duration 15s"
+  "description": "Timeline with 10s video starting at 0:00, 10s audio starting at 0:05, 5s second video starting at 0:15, total duration 20s"
 }
