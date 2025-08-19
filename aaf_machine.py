@@ -4,256 +4,190 @@ import json
 
 # function will take metadata from JSON file and aaf output name
 def create_linked_aaf_from_metadata(metadata_file, aaf_output):
-    # creating aaf file based on JSON metadat
+    """Create a linked AAF file based on JSON metadata - handles any number of video/audio files"""
+    
     # Load metadata
     with open(metadata_file, 'r') as f:
         # the variable metadata will contain the data from JSON file
         metadata = json.load(f)
     
     timeline = metadata['timeline'] # get timeline data from json
-    video_info = metadata['video'] # get video data from json
-    video2_info = metadata['video2'] # get second video data from json
-    audio_info = metadata['audio'] # get audio data from json
     tracks = metadata['tracks']
+    
+    # Automatically discover all media files in the JSON
+    media_files = {}
+    source_files = set()
+    
+    # Find all media entries (anything that's not 'timeline' or 'tracks')
+    for key, value in metadata.items():
+        if key not in ['timeline', 'tracks', 'description'] and isinstance(value, dict) and 'file' in value:
+            media_files[value['basename']] = value
+            source_files.add(value['file'])
+            print(f"Found media: {key} -> {value['basename']}")
     
     print(f"Creating AAF: {aaf_output}")
     print(f"Timeline duration: {timeline['duration_seconds']}s ({timeline['total_frames']} frames)")
-    print(f"Video 1: {video_info['duration_seconds']}s starting at {video_info['start_time_seconds']}s")
-    print(f"Video 2: {video2_info['duration_seconds']}s starting at {video2_info['start_time_seconds']}s")
-    print(f"Audio: {audio_info['duration_seconds']}s starting at {audio_info['start_time_seconds']}s")
+    print(f"Found {len(media_files)} media files:")
+    for basename, info in media_files.items():
+        print(f"  - {basename}: {info['duration_seconds']}s, {info['media_kind']}")
     print()
     
-    # Check if source files exist
-    video_file = video_info['file']
-    video2_file = video2_info['file']
-    audio_file = audio_info['file']
+    # Check if all source files exist
+    missing_files = []
+    for file_path in source_files:
+        if not os.path.exists(file_path):
+            missing_files.append(file_path)
     
-    if not os.path.exists(video_file):
-        print(f"ERROR: Video file {video_file} not found!")
-        return False
-    if not os.path.exists(video2_file):
-        print(f"ERROR: Video 2 file {video2_file} not found!")
-        return False
-    if not os.path.exists(audio_file):
-        print(f"ERROR: Audio file {audio_file} not found!")
+    if missing_files:
+        print("ERROR: The following files were not found:")
+        for file in missing_files:
+            print(f"  - {file}")
         return False
     
     try:
         with aaf2.open(aaf_output, 'w') as f:
             edit_rate = timeline['edit_rate']
             
-            # Create MasterMobs for both videos and audio
-            video_master = f.create.MasterMob(video_info['basename'])
-            video2_master = f.create.MasterMob(video2_info['basename'])
-            audio_master = f.create.MasterMob(audio_info['basename'])
-            f.content.mobs.append(video_master)
-            f.content.mobs.append(video2_master)
-            f.content.mobs.append(audio_master)
-            print("Created MasterMobs for 2 videos and 1 audio")
+            # Create MasterMobs and SourceMobs for all media files dynamically
+            master_mobs = {}
+            source_mobs = {}
+            master_slots = {}
             
-            # Create external file references instead of importing essence
-            print("Creating video file reference...")
-            # Create SourceMob for video with file locator
-            video_source_mob = f.create.SourceMob(video_info['basename'] + ".PHYS")
-            f.content.mobs.append(video_source_mob)
+            print("Creating MasterMobs and SourceMobs for all media...")
             
-            # Create file locator pointing to MXF file
-            video_locator = f.create.NetworkLocator()
-            video_locator['URLString'].value = video_info['basename']
+            for basename, media_info in media_files.items():
+                print(f"Processing {basename} ({media_info['media_kind']})...")
+                
+                # Create MasterMob
+                master_mob = f.create.MasterMob(basename)
+                f.content.mobs.append(master_mob)
+                master_mob.name = basename
+                master_mobs[basename] = master_mob
+                
+                # Create SourceMob
+                source_mob = f.create.SourceMob(basename + ".PHYS")
+                f.content.mobs.append(source_mob)
+                source_mobs[basename] = source_mob
+                
+                # Create file locator
+                locator = f.create.NetworkLocator()
+                locator['URLString'].value = basename
+                
+                # Create appropriate descriptor based on media type
+                if media_info['media_kind'] == 'picture':
+                    # Video descriptor
+                    descriptor = f.create.CDCIDescriptor()
+                    descriptor['Locator'].append(locator)
+                    descriptor['SampleRate'].value = edit_rate
+                    descriptor['StoredWidth'].value = media_info['format']['width']
+                    descriptor['StoredHeight'].value = media_info['format']['height']
+                    descriptor['FrameLayout'].value = "FullFrame"
+                    descriptor['ImageAspectRatio'].value = media_info['format']['aspect_ratio']
+                    descriptor['Length'].value = media_info['duration_frames']
+                    descriptor['ComponentWidth'].value = 8
+                    descriptor['HorizontalSubsampling'].value = 2
+                    descriptor['VideoLineMap'].value = [42, 0]
+                    
+                elif media_info['media_kind'] == 'sound':
+                    # Audio descriptor
+                    descriptor = f.create.PCMDescriptor()
+                    descriptor['Locator'].append(locator)
+                    descriptor['SampleRate'].value = media_info['format']['sample_rate']
+                    descriptor['Channels'].value = media_info['format']['channels']
+                    descriptor['QuantizationBits'].value = media_info['format']['bit_depth']
+                    descriptor['BlockAlign'].value = media_info['format']['block_align']
+                    descriptor['AverageBPS'].value = media_info['format']['sample_rate'] * media_info['format']['channels'] * (media_info['format']['bit_depth'] // 8)
+                    descriptor['AudioSamplingRate'].value = media_info['format']['sample_rate']
+                    descriptor['Length'].value = media_info['format']['sample_rate'] * media_info['duration_seconds']
+                
+                source_mob.descriptor = descriptor
+                
+                # Create slot in SourceMob
+                source_slot = source_mob.create_empty_slot(edit_rate=edit_rate, media_kind=media_info['media_kind'], slot_id=1)
+                source_slot.segment.length = media_info['duration_frames']
+                
+                # Create slot in MasterMob and link to SourceMob
+                master_slot = master_mob.create_timeline_slot(edit_rate=edit_rate)
+                master_slot.segment = source_mob.create_source_clip(1, media_kind=media_info['media_kind'])
+                master_slot.segment.length = media_info['duration_frames']
+                master_slots[basename] = master_slot
+                
+                print(f"Created {basename}: {media_info['duration_frames']} frames")
             
-            # Create video descriptor with file reference
-            video_descriptor = f.create.CDCIDescriptor()
-            video_descriptor['Locator'].append(video_locator)
-            video_descriptor['SampleRate'].value = edit_rate
-            video_descriptor['StoredWidth'].value = video_info['format']['width']
-            video_descriptor['StoredHeight'].value = video_info['format']['height']
-            video_descriptor['FrameLayout'].value = "FullFrame"
-            video_descriptor['ImageAspectRatio'].value = video_info['format']['aspect_ratio']
-            video_descriptor['Length'].value = video_info['duration_frames']
-            # Add missing required properties
-            video_descriptor['ComponentWidth'].value = 8  # 8-bit components
-            video_descriptor['HorizontalSubsampling'].value = 2  # 4:2:2 subsampling typical for DNxHD
-            video_descriptor['VideoLineMap'].value = [42, 0]  # Standard progressive line map
-            video_source_mob.descriptor = video_descriptor
+            print(f"Created {len(master_mobs)} MasterMobs and {len(source_mobs)} SourceMobs")
             
-            # Create video slot in SourceMob
-            video_source_slot = video_source_mob.create_empty_slot(edit_rate=edit_rate, media_kind='picture', slot_id=1)
-            video_source_slot.segment.length = video_info['duration_frames']
-            
-            # Link MasterMob to SourceMob
-            video_master_slot = video_master.create_timeline_slot(edit_rate=edit_rate)
-            video_master_slot.segment = video_source_mob.create_source_clip(1, media_kind='picture')
-            video_master_slot.segment.length = video_info['duration_frames']
-            
-            print("Creating video2 file reference...")
-            # Create SourceMob for second video with file locator
-            video2_source_mob = f.create.SourceMob(video2_info['basename'] + ".PHYS")
-            f.content.mobs.append(video2_source_mob)
-            
-            # Create file locator pointing to second MXF file
-            video2_locator = f.create.NetworkLocator()
-            video2_locator['URLString'].value = video2_info['basename']
-            
-            # Create video2 descriptor with file reference
-            video2_descriptor = f.create.CDCIDescriptor()
-            video2_descriptor['Locator'].append(video2_locator)
-            video2_descriptor['SampleRate'].value = edit_rate
-            video2_descriptor['StoredWidth'].value = video2_info['format']['width']
-            video2_descriptor['StoredHeight'].value = video2_info['format']['height']
-            video2_descriptor['FrameLayout'].value = "FullFrame"
-            video2_descriptor['ImageAspectRatio'].value = video2_info['format']['aspect_ratio']
-            video2_descriptor['Length'].value = video2_info['duration_frames']
-            # Add missing required properties
-            video2_descriptor['ComponentWidth'].value = 8  # 8-bit components
-            video2_descriptor['HorizontalSubsampling'].value = 2  # 4:2:2 subsampling typical for DNxHD
-            video2_descriptor['VideoLineMap'].value = [42, 0]  # Standard progressive line map
-            video2_source_mob.descriptor = video2_descriptor
-            
-            # Create video2 slot in SourceMob
-            video2_source_slot = video2_source_mob.create_empty_slot(edit_rate=edit_rate, media_kind='picture', slot_id=1)
-            video2_source_slot.segment.length = video2_info['duration_frames']
-            
-            # Link MasterMob to SourceMob for video2
-            video2_master_slot = video2_master.create_timeline_slot(edit_rate=edit_rate)
-            video2_master_slot.segment = video2_source_mob.create_source_clip(1, media_kind='picture')
-            video2_master_slot.segment.length = video2_info['duration_frames']
-            
-            print("Creating audio file reference...")
-            # Create SourceMob for audio with file locator
-            audio_source_mob = f.create.SourceMob(audio_info['basename'] + ".PHYS")
-            f.content.mobs.append(audio_source_mob)
-            
-            # Create file locator pointing to WAV file
-            audio_locator = f.create.NetworkLocator()
-            audio_locator['URLString'].value = audio_info['basename']
-            
-            # Create audio descriptor with file reference
-            audio_descriptor = f.create.PCMDescriptor()
-            audio_descriptor['Locator'].append(audio_locator)
-            audio_descriptor['SampleRate'].value = audio_info['format']['sample_rate']
-            audio_descriptor['Channels'].value = audio_info['format']['channels']
-            audio_descriptor['QuantizationBits'].value = audio_info['format']['bit_depth']
-            audio_descriptor['BlockAlign'].value = audio_info['format']['block_align']
-            audio_descriptor['AverageBPS'].value = audio_info['format']['sample_rate'] * audio_info['format']['channels'] * (audio_info['format']['bit_depth'] // 8)
-            audio_descriptor['AudioSamplingRate'].value = audio_info['format']['sample_rate']
-            audio_descriptor['Length'].value = audio_info['format']['sample_rate'] * audio_info['duration_seconds']  # Total samples
-            audio_source_mob.descriptor = audio_descriptor
-            
-            # Create audio slot in SourceMob
-            audio_source_slot = audio_source_mob.create_empty_slot(edit_rate=edit_rate, media_kind='sound', slot_id=1)
-            audio_source_slot.segment.length = audio_info['duration_frames']
-            
-            # Link MasterMob to SourceMob
-            audio_master_slot = audio_master.create_timeline_slot(edit_rate=edit_rate)
-            audio_master_slot.segment = audio_source_mob.create_source_clip(1, media_kind='sound')
-            audio_master_slot.segment.length = audio_info['duration_frames']
-            
-            # Set names
-            video_master.name = video_info['basename']
-            video2_master.name = video2_info['basename']
-            audio_master.name = audio_info['basename']
-            
-            # Get slots from MasterMobs
-            video_slot = video_master.slots[0]
-            video2_slot = video2_master.slots[0]
-            audio_slot = audio_master.slots[0]
-            
-            print(f"Video 1 slot length: {video_slot.segment.length} frames")
-            print(f"Video 2 slot length: {video2_slot.segment.length} frames")
-            print(f"Audio slot length: {audio_slot.segment.length} frames")
-            
-            # Create timeline (CompositionMob)
+            # Create timeline (CompositionMob) - ONLY ONE
             comp_mob = f.create.CompositionMob(timeline['name'])
             f.content.mobs.append(comp_mob)
-            print("Created timeline")
+            print("Created single timeline")
             
-            # Process video track with multiple clips
-            video_track = tracks[0]
-            
-            # Create video timeline slot
-            video_timeline_slot = comp_mob.create_picture_slot(edit_rate=edit_rate)
-            video_timeline_slot.slot_id = video_track['track_id']
-            
-            # Process each video clip
-            for i, video_clip_info in enumerate(video_track['clips']):
-                print(f"Processing video clip {i+1}: {video_clip_info['source_file']}")
+            # Process all tracks dynamically
+            for track in tracks:
+                print(f"Processing {track['type']} track: {track['name']}")
                 
-                # Determine which master mob to use based on source file
-                if video_clip_info['source_file'] == video_info['basename']:
-                    master_mob = video_master
-                    master_slot = video_slot
-                    print(f"Using video 1 master mob")
-                elif video_clip_info['source_file'] == video2_info['basename']:
-                    master_mob = video2_master
-                    master_slot = video2_slot
-                    print(f"Using video 2 master mob")
+                # Create appropriate timeline slot based on track type
+                if track['type'] == 'video':
+                    timeline_slot = comp_mob.create_picture_slot(edit_rate=edit_rate)
+                    media_kind = 'Picture'
+                elif track['type'] == 'audio':
+                    timeline_slot = comp_mob.create_sound_slot(edit_rate=edit_rate)
+                    media_kind = 'Sound'
                 else:
-                    print(f"ERROR: Unknown video file {video_clip_info['source_file']}")
+                    print(f"Unknown track type: {track['type']}")
                     continue
                 
-                # Add filler if there's a gap before this clip
-                if i == 0 and video_clip_info['timeline_in'] > 0:
-                    # Add filler at the beginning
-                    filler = f.create.Filler()
-                    filler.length = video_clip_info['timeline_in']
-                    filler.media_kind = 'Picture'
-                    video_timeline_slot.segment.components.append(filler)
-                    print(f"Added video filler: {video_clip_info['timeline_in']} frames")
-                elif i > 0:
-                    # Check if there's a gap between this clip and the previous one
-                    prev_clip = video_track['clips'][i-1]
-                    gap = video_clip_info['timeline_in'] - (prev_clip['timeline_out'] + 1)
-                    if gap > 0:
+                timeline_slot.slot_id = track['track_id']
+                
+                # Process all clips in this track
+                for i, clip_info in enumerate(track['clips']):
+                    source_file = clip_info['source_file']
+                    print(f"  Processing clip {i+1}: {source_file}")
+                    
+                    # Find the corresponding master mob
+                    master_mob = master_mobs.get(source_file)
+                    master_slot = master_slots.get(source_file)
+                    
+                    if not master_mob or not master_slot:
+                        print(f"ERROR: Could not find master mob for {source_file}")
+                        continue
+                    
+                    # Add filler if there's a gap before this clip
+                    if i == 0 and clip_info['timeline_in'] > 0:
+                        # Add filler at the beginning
                         filler = f.create.Filler()
-                        filler.length = gap
-                        filler.media_kind = 'Picture'
-                        video_timeline_slot.segment.components.append(filler)
-                        print(f"Added video gap filler: {gap} frames")
-                
-                # Create video source clip
-                video_source_clip = f.create.SourceClip(
-                    length=video_clip_info['duration'],
-                    mob_id=master_mob.mob_id,
-                    slot_id=master_slot.slot_id,
-                    start=video_clip_info['source_in']  # Start position in source
-                )
-                
-                # Add to sequence
-                video_timeline_slot.segment.components.append(video_source_clip)
-                print(f"Added video clip: {video_clip_info['duration']} frames at timeline position {video_clip_info['timeline_in']}")
+                        filler.length = clip_info['timeline_in']
+                        filler.media_kind = media_kind
+                        timeline_slot.segment.components.append(filler)
+                        print(f"    Added filler: {clip_info['timeline_in']} frames")
+                    elif i > 0:
+                        # Check if there's a gap between this clip and the previous one
+                        prev_clip = track['clips'][i-1]
+                        gap = clip_info['timeline_in'] - (prev_clip['timeline_out'] + 1)
+                        if gap > 0:
+                            filler = f.create.Filler()
+                            filler.length = gap
+                            filler.media_kind = media_kind
+                            timeline_slot.segment.components.append(filler)
+                            print(f"    Added gap filler: {gap} frames")
+                    
+                    # Create source clip
+                    source_clip = f.create.SourceClip(
+                        length=clip_info['duration'],
+                        mob_id=master_mob.mob_id,
+                        slot_id=master_slot.slot_id,
+                        start=clip_info['source_in']  # Start position in source
+                    )
+                    
+                    # Add to sequence
+                    timeline_slot.segment.components.append(source_clip)
+                    print(f"    Added clip: {clip_info['duration']} frames at timeline position {clip_info['timeline_in']}")
             
-            # Process audio track
-            audio_track = tracks[1]
-            audio_clip_info = audio_track['clips'][0]
-            
-            # Create audio timeline slot
-            audio_timeline_slot = comp_mob.create_sound_slot(edit_rate=edit_rate)
-            audio_timeline_slot.slot_id = audio_track['track_id']
-            
-            # For audio starting at 5 seconds, we need to add a filler first
-            if audio_clip_info['timeline_in'] > 0:
-                # Add filler for the gap before audio starts
-                filler = f.create.Filler()
-                filler.length = audio_clip_info['timeline_in']  # 125 frames (5 seconds)
-                filler.media_kind = 'Sound'
-                audio_timeline_slot.segment.components.append(filler)
-                print(f"Added audio filler: {audio_clip_info['timeline_in']} frames")
-            
-            # Create audio source clip
-            audio_source_clip = f.create.SourceClip(
-                length=audio_clip_info['duration'],
-                mob_id=audio_master.mob_id,
-                slot_id=audio_slot.slot_id,
-                start=audio_clip_info['source_in']  # Start position in source
-            )
-            
-            # Add to sequence
-            audio_timeline_slot.segment.components.append(audio_source_clip)
-            print(f"Added audio clip: {audio_clip_info['duration']} frames at timeline position {audio_clip_info['timeline_in']}")
-            
-            print(f"Timeline structure:")
-            print(f"  Video track: 0-{video_clip_info['timeline_out']} ({video_clip_info['duration']} frames)")
-            print(f"  Audio track: {audio_clip_info['timeline_in']}-{audio_clip_info['timeline_out']} ({audio_clip_info['duration']} frames)")
+            # Print final timeline structure
+            print(f"\\nTimeline structure:")
+            for track in tracks:
+                print(f"  {track['name']} (Track {track['track_id']}):")
+                for i, clip in enumerate(track['clips']):
+                    print(f"    Clip {i+1}: {clip['source_file']} -> frames {clip['timeline_in']}-{clip['timeline_out']} ({clip['duration']} frames)")
             print(f"  Total duration: {timeline['total_frames']} frames ({timeline['duration_seconds']}s)")
             
             print("AAF file creation completed successfully!")
