@@ -1,8 +1,8 @@
 import aaf2
 import os
 
-aaf_path = "output1.aaf"
-video_filename = "output.dnxhd"
+aaf_path = "new.aaf"
+video_filename = "output.mxf"  # Change to MXF format
 audio_filename = "output.wav"
 base_name = os.path.splitext(os.path.basename(aaf_path))[0]
 
@@ -23,45 +23,84 @@ try:
     with aaf2.open(aaf_path, 'w') as f:
         print("Creating AAF file...")
         
+        # Set up file names with just the basename (no path)
+        video_basename = os.path.basename(video_filename)
+        audio_basename = os.path.basename(audio_filename)
+        
         # creating mastermob for media, setting the name to video filename with extension
-        mob = f.create.MasterMob(video_filename) # the mastermob contains the video
-        a_mob = f.create.MasterMob(audio_filename) # the mastermob contains the audio data
+        mob = f.create.MasterMob(video_basename) # the mastermob contains the video
+        a_mob = f.create.MasterMob(audio_basename) # the mastermob contains the audio data
         f.content.mobs.append(mob) # add the data to the AAF content
         f.content.mobs.append(a_mob) # add the audio data to the AAF content
         print("Created MasterMobs")
         
         edit_rate = 25
 
-        # Import video and audio essence using lower-level methods
-        print("Creating video essence...")
-        video_source_mob = f.create.SourceMob()
-        video_source_mob.name = video_filename + ".PHYS"
+        # Use MXF import and create proper file locators
+        print("Importing video from MXF...")
+        # Create SourceMob for video
+        video_source_mob = f.create.SourceMob(video_basename + ".PHYS")
         f.content.mobs.append(video_source_mob)
         
-        # Create essence data for video
-        video_essence_data = video_source_mob.create_essence(edit_rate, "picture", offline=False)
-        with open(video_filename, 'rb') as video_file:
-            video_essence_data.write(video_file.read())
-        print("Video essence created and embedded")
+        # Create file locator for video
+        video_locator = f.create.NetworkLocator()
+        video_locator['URLString'].value = video_basename  # Just the filename
         
-        print("Creating audio essence...")
-        audio_source_mob = f.create.SourceMob()
-        audio_source_mob.name = audio_filename + ".PHYS"
+        # Create essence descriptor for MXF
+        video_descriptor = f.create.CDCIDescriptor()
+        video_descriptor['Locator'].append(video_locator)
+        video_descriptor['SampleRate'].value = edit_rate
+        video_descriptor['StoredWidth'].value = 1920
+        video_descriptor['StoredHeight'].value = 1080
+        video_descriptor['FrameLayout'].value = "FullFrame"
+        video_descriptor['ImageAspectRatio'].value = "16/9"
+        video_descriptor['Length'].value = 250  # 10 seconds at 25fps
+        video_source_mob.descriptor = video_descriptor
+        
+        # Create video slot
+        video_source_slot = video_source_mob.create_empty_slot(edit_rate=edit_rate, media_kind='picture', slot_id=1)
+        video_source_slot.segment.length = 250
+        
+        # Link MasterMob to SourceMob
+        mob_video_slot = mob.create_timeline_slot(edit_rate=edit_rate)
+        mob_video_slot.segment = video_source_mob.create_source_clip(1, media_kind='picture')
+        mob_video_slot.segment.length = 250
+        print("Video linked successfully")
+        
+        print("Importing audio...")
+        # Create SourceMob for audio
+        audio_source_mob = f.create.SourceMob(audio_basename + ".PHYS")
         f.content.mobs.append(audio_source_mob)
         
-        # Create essence data for audio
-        audio_essence_data = audio_source_mob.create_essence(edit_rate, "sound", offline=False)
-        with open(audio_filename, 'rb') as audio_file:
-            audio_essence_data.write(audio_file.read())
-        print("Audio essence created and embedded")
+        # Create file locator for audio
+        audio_locator = f.create.NetworkLocator()
+        audio_locator['URLString'].value = audio_basename  # Just the filename
         
-        # Link MasterMobs to SourceMobs
-        mob.link_external_essence(video_source_mob)
-        a_mob.link_external_essence(audio_source_mob)
+        # Create essence descriptor for audio
+        audio_descriptor = f.create.PCMDescriptor()
+        audio_descriptor['Locator'].append(audio_locator)
+        audio_descriptor['SampleRate'].value = 48000
+        audio_descriptor['Channels'].value = 2
+        audio_descriptor['QuantizationBits'].value = 16
+        audio_descriptor['BlockAlign'].value = 4
+        audio_descriptor['AverageBPS'].value = 192000
+        audio_descriptor['AudioSamplingRate'].value = 48000
+        audio_descriptor['Length'].value = 480000  # 10 seconds at 48kHz
+        audio_source_mob.descriptor = audio_descriptor
+        
+        # Create audio slot
+        audio_source_slot = audio_source_mob.create_empty_slot(edit_rate=edit_rate, media_kind='sound', slot_id=1)
+        audio_source_slot.segment.length = 250  # 10 seconds in timeline frames
+        
+        # Link MasterMob to SourceMob
+        mob_audio_slot = a_mob.create_timeline_slot(edit_rate=edit_rate)
+        mob_audio_slot.segment = audio_source_mob.create_source_clip(1, media_kind='sound')
+        mob_audio_slot.segment.length = 250
+        print("Audio linked successfully")
 
-        # setting the mob's name property to the full filename 
-        mob.name = video_filename
-        a_mob.name = audio_filename
+        # setting the mob's name property to the basename only 
+        mob.name = video_basename
+        a_mob.name = audio_basename
 
         # Get video and audio slots from their respective MasterMobs
         print(f"Video slots: {len(mob.slots)}")

@@ -42,12 +42,69 @@ def create_linked_aaf_from_metadata(metadata_file, aaf_output):
             f.content.mobs.append(audio_master)
             print("Created MasterMobs")
             
-            # Import essence (linked, not embedded)
-            print("Importing video essence...")
-            video_master.import_dnxhd_essence(video_file, edit_rate)
+            # Create external file references instead of importing essence
+            print("Creating video file reference...")
+            # Create SourceMob for video with file locator
+            video_source_mob = f.create.SourceMob(video_info['basename'] + ".PHYS")
+            f.content.mobs.append(video_source_mob)
             
-            print("Importing audio essence...")
-            audio_master.import_audio_essence(audio_file, edit_rate)
+            # Create file locator pointing to MXF file
+            video_locator = f.create.NetworkLocator()
+            video_locator['URLString'].value = video_info['basename']
+            
+            # Create video descriptor with file reference
+            video_descriptor = f.create.CDCIDescriptor()
+            video_descriptor['Locator'].append(video_locator)
+            video_descriptor['SampleRate'].value = edit_rate
+            video_descriptor['StoredWidth'].value = video_info['format']['width']
+            video_descriptor['StoredHeight'].value = video_info['format']['height']
+            video_descriptor['FrameLayout'].value = "FullFrame"
+            video_descriptor['ImageAspectRatio'].value = video_info['format']['aspect_ratio']
+            video_descriptor['Length'].value = video_info['duration_frames']
+            # Add missing required properties
+            video_descriptor['ComponentWidth'].value = 8  # 8-bit components
+            video_descriptor['HorizontalSubsampling'].value = 2  # 4:2:2 subsampling typical for DNxHD
+            video_descriptor['VideoLineMap'].value = [42, 0]  # Standard progressive line map
+            video_source_mob.descriptor = video_descriptor
+            
+            # Create video slot in SourceMob
+            video_source_slot = video_source_mob.create_empty_slot(edit_rate=edit_rate, media_kind='picture', slot_id=1)
+            video_source_slot.segment.length = video_info['duration_frames']
+            
+            # Link MasterMob to SourceMob
+            video_master_slot = video_master.create_timeline_slot(edit_rate=edit_rate)
+            video_master_slot.segment = video_source_mob.create_source_clip(1, media_kind='picture')
+            video_master_slot.segment.length = video_info['duration_frames']
+            
+            print("Creating audio file reference...")
+            # Create SourceMob for audio with file locator
+            audio_source_mob = f.create.SourceMob(audio_info['basename'] + ".PHYS")
+            f.content.mobs.append(audio_source_mob)
+            
+            # Create file locator pointing to WAV file
+            audio_locator = f.create.NetworkLocator()
+            audio_locator['URLString'].value = audio_info['basename']
+            
+            # Create audio descriptor with file reference
+            audio_descriptor = f.create.PCMDescriptor()
+            audio_descriptor['Locator'].append(audio_locator)
+            audio_descriptor['SampleRate'].value = audio_info['format']['sample_rate']
+            audio_descriptor['Channels'].value = audio_info['format']['channels']
+            audio_descriptor['QuantizationBits'].value = audio_info['format']['bit_depth']
+            audio_descriptor['BlockAlign'].value = audio_info['format']['block_align']
+            audio_descriptor['AverageBPS'].value = audio_info['format']['sample_rate'] * audio_info['format']['channels'] * (audio_info['format']['bit_depth'] // 8)
+            audio_descriptor['AudioSamplingRate'].value = audio_info['format']['sample_rate']
+            audio_descriptor['Length'].value = audio_info['format']['sample_rate'] * audio_info['duration_seconds']  # Total samples
+            audio_source_mob.descriptor = audio_descriptor
+            
+            # Create audio slot in SourceMob
+            audio_source_slot = audio_source_mob.create_empty_slot(edit_rate=edit_rate, media_kind='sound', slot_id=1)
+            audio_source_slot.segment.length = audio_info['duration_frames']
+            
+            # Link MasterMob to SourceMob
+            audio_master_slot = audio_master.create_timeline_slot(edit_rate=edit_rate)
+            audio_master_slot.segment = audio_source_mob.create_source_clip(1, media_kind='sound')
+            audio_master_slot.segment.length = audio_info['duration_frames']
             
             # Set names
             video_master.name = video_info['basename']
