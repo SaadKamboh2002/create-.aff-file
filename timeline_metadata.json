@@ -56,6 +56,23 @@
       "aspect_ratio": "16/9"
     }
   },
+  "audio2": {
+    "file": "sound2.wav",
+    "basename": "sound2.wav",
+    "start_time_seconds": 15,
+    "start_frame": 375,
+    "duration_seconds": 5,
+    "duration_frames": 125,
+    "end_frame": 499,
+    "media_kind": "sound",
+    "format": {
+      "codec": "PCM",
+      "channels": 2,
+      "sample_rate": 48000,
+      "bit_depth": 16,
+      "block_align": 4
+    }
+  },
   "tracks": [
     {
       "track_id": 1,
@@ -92,6 +109,14 @@
           "timeline_in": 125,
           "timeline_out": 374,
           "duration": 250
+        },
+        {
+          "source_file": "sound2.wav",
+          "source_in": 0,
+          "source_out": 124,
+          "timeline_in": 375,
+          "timeline_out": 499,
+          "duration": 125
         }
       ]
     }
